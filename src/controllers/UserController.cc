@@ -60,3 +60,68 @@ drogon::Task<drogon::HttpResponsePtr> UserController::getProfile(drogon::HttpReq
         co_return resp;
     }
 }
+
+drogon::Task<drogon::HttpResponsePtr> UserController::searchUsers(drogon::HttpRequestPtr req) {
+    auto dbClient = drogon::app().getDbClient();
+    std::string query = req->getParameter("q");
+
+    if (query.empty() || query.length() < 3) {
+        Json::Value json;
+        json["status"] = "success";
+        json["users"] = Json::Value(Json::arrayValue);
+        co_return drogon::HttpResponse::newHttpJsonResponse(json);
+    }
+
+    // Лямбда-помощник для сборки JSON-ответа (чтобы избежать дублирования кода)
+    auto buildJsonResponse = [](const drogon::orm::Result& result) {
+        Json::Value jsonUsers(Json::arrayValue);
+        for (auto row : result) {
+            Json::Value user;
+            user["id"] = row["id"].as<int>();
+            user["username"] = row["username"].as<std::string>();
+            user["first_name"] = row["first_name"].as<std::string>();
+            user["last_name"] = row["last_name"].isNull() ? "" : row["last_name"].as<std::string>();
+            user["user_code"] = row["user_code"].as<std::string>();
+            
+            jsonUsers.append(user);
+        }
+
+        Json::Value json;
+        json["status"] = "success";
+        json["users"] = jsonUsers;
+        return drogon::HttpResponse::newHttpJsonResponse(json);
+    };
+
+    try {
+        // Если поиск по уникальному коду пользователя
+        if (query.rfind("USR-", 0) == 0) {
+            auto result = co_await dbClient->execSqlCoro(
+                "SELECT id, username, first_name, last_name, user_code "
+                "FROM users WHERE user_code = $1 LIMIT 1;",
+                query
+            );
+            co_return buildJsonResponse(result);
+        } 
+        // Иначе нечеткий поиск по имени / фамилии / юзернейму
+        else {
+            std::string likeQuery = "%" + query + "%";
+            auto result = co_await dbClient->execSqlCoro(
+                "SELECT id, username, first_name, last_name, user_code "
+                "FROM users "
+                "WHERE username ILIKE $1 OR (first_name || ' ' || last_name) ILIKE $1 "
+                "LIMIT 20;",
+                likeQuery
+            );
+            co_return buildJsonResponse(result);
+        }
+
+    } catch (const std::exception& e) {
+        Json::Value json;
+        json["status"] = "error";
+        json["message"] = "Database error: " + std::string(e.what());
+        
+        auto resp = drogon::HttpResponse::newHttpJsonResponse(json);
+        resp->setStatusCode(drogon::k500InternalServerError);
+        co_return resp;
+    }
+}

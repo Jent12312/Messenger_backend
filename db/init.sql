@@ -13,3 +13,10 @@ CREATE TABLE IF NOT EXISTS users (
 -- Создаем индексы для быстрого поиска
 CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
 CREATE INDEX IF NOT EXISTS idx_users_user_code ON users(user_code);
+
+-- Включаем расширение для нечеткого поиска (триграммы)
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+
+-- Создаем GIN-индексы для мгновенного поиска по тексту
+CREATE INDEX IF NOT EXISTS idx_users_username_trgm ON users USING GIN (username gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_users_names_trgm ON users USING GIN ((first_name || ' ' || last_name) gin_trgm_ops);
