@@ -38,6 +38,7 @@
 ├── config.json              # Конфигурация Drogon (порты, пулы подключений к БД/Redis)
 ├── docker-compose.yml       # Локальное окружение (App + Postgres + Redis)
 └── Dockerfile               # Инструкция сборки Docker-образа
+```text
 🚀 Быстрый запуск (Локально)
 Требования
 Установленный Docker и Docker Compose
