@@ -1,4 +1,3 @@
-```markdown
 # 🚀 High-Performance Messenger Backend (C++ / Drogon)
 
 Энтерпрайз-бэкенд для мессенджера, разработанный на C++20 с использованием фреймворка [Drogon](https://github.com/drogonframework/drogon) (самого быстрого веб-фреймворка по версии TechEmpower). 
@@ -85,8 +84,4 @@
 ```http
 Authorization: Bearer <ваш_токен_из_redis>
 ```
-
----
-*Разработано для высоконагруженных систем.*
 ```
-***
