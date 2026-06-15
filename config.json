@@ -25,5 +25,15 @@
             "passwd": "secretpassword",
             "connection_number": 5
         }
+    ],
+    "redis_clients": [ 
+        {
+            "name": "default",
+            "host": "redis",
+            "port": 6379,
+            "passwd": "",
+            "db": 0,
+            "connection_number": 5
+        }
     ]
 }
