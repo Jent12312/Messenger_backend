@@ -1,16 +1,23 @@
 #include <drogon/drogon.h>
 
 int main() {
-    // Настраиваем логгер
     LOG_INFO << "Starting Messenger Backend...";
+    
+    // Загружаем настройки из конфига
+    drogon::app().loadConfigFile("config.json");
 
-    // Конфигурируем и запускаем сервер
-    drogon::app()
-        .setLogPath("")
-        .setLogLevel(trantor::Logger::kDebug)
-        .addListener("0.0.0.0", 8080)
-        .setThreadNum(0) // 0 означает: создать потоки по числу ядер процессора
-        .run();
+    // Этот код сработает сразу после успешного старта сервера
+    drogon::app().registerBeginningAdvice([]() {
+        auto client = drogon::app().getDbClient();
+        if (client) {
+            LOG_INFO << ">>> SUCCESS: PostgreSQL client initialized and ready!";
+        } else {
+            LOG_ERROR << ">>> FATAL: PostgreSQL client failed to initialize.";
+        }
+    });
+
+    // Запускаем цикл (именно здесь создается подключение к БД)
+    drogon::app().run();
 
     return 0;
 }

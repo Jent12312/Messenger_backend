@@ -1,0 +1,29 @@
+{
+    "app": {
+        "threads_num": 0,
+        "document_root": "./",
+        "log": {
+            "log_path": "", 
+            "log_level": "DEBUG"
+        }
+    },
+    "listeners": [
+        {
+            "address": "0.0.0.0",
+            "port": 8080,
+            "https": false
+        }
+    ],
+    "db_clients": [
+        {
+            "name": "default",
+            "rdbms": "postgresql",
+            "host": "postgres",
+            "port": 5432,
+            "dbname": "messenger_db",
+            "user": "messenger_user",
+            "passwd": "secretpassword",
+            "connection_number": 5
+        }
+    ]
+}

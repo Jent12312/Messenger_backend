@@ -1,0 +1,8 @@
+build/
+.vscode/
+.git/
+.gitignore
+vcpkg/
+CMakeCache.txt
+CMakeFiles/
+CMakePresets.json
