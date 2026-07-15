@@ -2,8 +2,6 @@ version: '3.8'
 services:
   backend:
     build: .
-    ports:
-      - "8080:8080"
     depends_on:
       postgres:
         condition: service_healthy # Ждем, пока Postgres станет здоровым
@@ -22,8 +20,6 @@ services:
       POSTGRES_USER: messenger_user
       POSTGRES_PASSWORD: secretpassword
       POSTGRES_DB: messenger_db
-    ports:
-      - "5432:5432"
     volumes:
       - pg_data:/var/lib/postgresql/data
       - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql
@@ -36,8 +32,6 @@ services:
 
   redis:
     image: redis:7-alpine
-    ports:
-      - "6379:6379"
 
 volumes:
   pg_data:
