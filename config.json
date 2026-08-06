@@ -18,20 +18,20 @@
         {
             "name": "default",
             "rdbms": "postgresql",
-            "host": "postgres",
+            "host": "f11zyl5wmix2dtocntebd9ex", 
             "port": 5432,
-            "dbname": "messenger_db",
-            "user": "messenger_user",
-            "passwd": "secretpassword",
+            "dbname": "postgres",
+            "user": "postgres",
+            "passwd": "k2EfDm3Em62h6Q2jmPVyQYmo6RuILtiajcImWPRE0Zb2TniCK7kzLjwjtiHGq5ze",
             "connection_number": 5
         }
     ],
-    "redis_clients": [ 
+    "redis_clients": [
         {
             "name": "default",
-            "host": "redis",
+            "host": "lv3w46r2acs03r6frasuajqj",
             "port": 6379,
-            "passwd": "",
+            "passwd": "vkrrt8auoXSNLkwJryyAu7HaXW0nHdzVc10R1eUBK7TKPQaaw6aqm0LJ9uHPiE64",
             "db": 0,
             "connection_number": 5
         }
