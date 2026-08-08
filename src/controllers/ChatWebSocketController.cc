@@ -101,23 +101,24 @@ void ChatWebSocketController::handleNewMessage(const drogon::WebSocketConnection
     }
     // 2. ДЕЙСТВИЕ: ПРОЧТЕНИЕ СООБЩЕНИЙ ("ГАЛОЧКИ")
     else if (action == "read_message") {
-        int chatId = inputJson["chat_id"].asInt();
-        int maxMessageId = inputJson["max_message_id"].asInt();
+        int64_t chatId = inputJson["chat_id"].asInt64();
+        int64_t maxMessageId = inputJson["max_message_id"].asInt64();
+        int64_t senderId64 = senderId;
 
-        drogon::async_run([senderId, chatId, maxMessageId]() -> drogon::Task<void> {
+        drogon::async_run([senderId, senderId64, chatId, maxMessageId]() -> drogon::Task<void> {
             auto dbClient = drogon::app().getDbClient();
 
             try {
                 // Обновляем id последнего прочитанного сообщения у этого пользователя
                 co_await dbClient->execSqlCoro(
                     "UPDATE chat_members SET last_read_message_id = GREATEST(last_read_message_id, $1) WHERE chat_id = $2 AND user_id = $3;",
-                    maxMessageId, chatId, senderId
+                    maxMessageId, chatId, senderId64
                 );
 
                 // Помечаем чужие сообщения прочитанными
                 co_await dbClient->execSqlCoro(
                     "UPDATE messages SET is_read = TRUE WHERE chat_id = $1 AND id <= $2 AND sender_id != $3 AND is_read = FALSE;",
-                    chatId, maxMessageId, senderId
+                    chatId, maxMessageId, senderId64
                 );
 
                 // Достаем всех участников чата
