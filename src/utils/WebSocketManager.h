@@ -34,7 +34,10 @@ public:
         std::shared_lock<std::shared_mutex> lock(mutex_);
         auto it = connections_.find(userId);
         if (it != connections_.end() && it->second->connected()) {
-            it->second->sendJson(message);
+            Json::StreamWriterBuilder builder;
+            builder["emitUTF8"] = true; 
+            std::string jsonStr = Json::writeString(builder, message);
+            it->second->send(jsonStr);
         }
     }
 

@@ -336,3 +336,86 @@ drogon::Task<drogon::HttpResponsePtr> ChatController::joinGroupViaInvite(drogon:
         co_return resp;
     }
 }
+
+// Получение истории сообщений с пагинацией (before_id)
+drogon::Task<drogon::HttpResponsePtr> ChatController::getChatMessages(drogon::HttpRequestPtr req, std::string chatIdStr) {
+    auto dbClient = drogon::app().getDbClient();
+    int currentUserId = std::stoi(req->attributes()->get<std::string>("user_id"));
+    int chatId = std::stoi(chatIdStr);
+
+    // Читаем параметры query: ?limit=50&before_id=100
+    std::string limitStr = req->getParameter("limit");
+    std::string beforeIdStr = req->getParameter("before_id");
+
+    int limit = limitStr.empty() ? 50 : std::stoi(limitStr);
+    if (limit > 100) limit = 100; // Ограничение безопасности
+    int beforeId = beforeIdStr.empty() ? 0 : std::stoi(beforeIdStr);
+
+    try {
+        // 1. Проверяем, состоит ли текущий пользователь в этом чате
+        auto memberCheck = co_await dbClient->execSqlCoro(
+            "SELECT user_id FROM chat_members WHERE chat_id = $1 AND user_id = $2;",
+            chatId, currentUserId
+        );
+
+        if (memberCheck.size() == 0) {
+            Json::Value json;
+            json["status"] = "error";
+            json["message"] = "Forbidden: You are not a member of this chat";
+            auto resp = drogon::HttpResponse::newHttpJsonResponse(json);
+            resp->setStatusCode(drogon::k403Forbidden);
+            co_return resp;
+        }
+
+        // 2. Выполняем SQL запрос истории сообщений
+        drogon::orm::Result result;
+        if (beforeId > 0) {
+            result = co_await dbClient->execSqlCoro(
+                "SELECT id, chat_id, sender_id, text, type, file_url, is_read, created_at "
+                "FROM messages "
+                "WHERE chat_id = $1 AND id < $2 "
+                "ORDER BY id DESC LIMIT $3;",
+                chatId, beforeId, limit
+            );
+        } else {
+            result = co_await dbClient->execSqlCoro(
+                "SELECT id, chat_id, sender_id, text, type, file_url, is_read, created_at "
+                "FROM messages "
+                "WHERE chat_id = $1 "
+                "ORDER BY id DESC LIMIT $2;",
+                chatId, limit
+            );
+        }
+
+        // 3. Собираем массив сообщений (разворачиваем в хронологическом порядке)
+        Json::Value jsonMessages(Json::arrayValue);
+        for (int i = result.size() - 1; i >= 0; --i) {
+            auto row = result[i];
+            Json::Value msg;
+            msg["id"] = row["id"].as<int>();
+            msg["chat_id"] = row["chat_id"].as<int>();
+            msg["sender_id"] = row["sender_id"].isNull() ? 0 : row["sender_id"].as<int>();
+            msg["text"] = row["text"].as<std::string>();
+            msg["type"] = row["type"].as<std::string>();
+            msg["file_url"] = row["file_url"].isNull() ? "" : row["file_url"].as<std::string>();
+            msg["is_read"] = row["is_read"].as<bool>();
+            msg["created_at"] = row["created_at"].as<std::string>();
+
+            jsonMessages.append(msg);
+        }
+
+        Json::Value json;
+        json["status"] = "success";
+        json["messages"] = jsonMessages;
+
+        co_return drogon::HttpResponse::newHttpJsonResponse(json);
+
+    } catch (const std::exception& e) {
+        Json::Value json;
+        json["status"] = "error";
+        json["message"] = "Database error: " + std::string(e.what());
+        auto resp = drogon::HttpResponse::newHttpJsonResponse(json);
+        resp->setStatusCode(drogon::k500InternalServerError);
+        co_return resp;
+    }
+}
