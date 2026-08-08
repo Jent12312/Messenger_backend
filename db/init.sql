@@ -5,7 +5,7 @@ CREATE TABLE IF NOT EXISTS users (
     password_hash VARCHAR(255) NOT NULL,
     first_name VARCHAR(50) NOT NULL,
     last_name VARCHAR(50),
-    user_code VARCHAR(12) UNIQUE NOT NULL,
+    user_code VARCHAR(32) UNIQUE NOT NULL,
     bio VARCHAR(255) DEFAULT '',
     dob DATE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
