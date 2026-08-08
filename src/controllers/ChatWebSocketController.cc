@@ -8,7 +8,7 @@ void ChatWebSocketController::handleNewConnection(const drogon::HttpRequestPtr &
     std::string token = req->getParameter("token");
 
     if (token.empty()) {
-        conn->shutdown(drogon::CloseCode::kViolation, "Missing token");
+        conn->shutdown(drogon::CloseCode::kPolicyViolation, "Missing token");
         return;
     }
 
@@ -18,7 +18,7 @@ void ChatWebSocketController::handleNewConnection(const drogon::HttpRequestPtr &
     redisClient->execCommandAsync(
         [conn](const drogon::nosql::RedisResult &r) {
             if (r.type() == drogon::nosql::RedisResultType::kNil) {
-                conn->shutdown(drogon::CloseCode::kViolation, "Invalid or expired token");
+                conn->shutdown(drogon::CloseCode::kPolicyViolation, "Invalid or expired token");
                 return;
             }
 
@@ -101,24 +101,24 @@ void ChatWebSocketController::handleNewMessage(const drogon::WebSocketConnection
     }
     // 2. ДЕЙСТВИЕ: ПРОЧТЕНИЕ СООБЩЕНИЙ ("ГАЛОЧКИ")
     else if (action == "read_message") {
-        int64_t chatId = inputJson["chat_id"].asInt64();
-        int64_t maxMessageId = inputJson["max_message_id"].asInt64();
-        int64_t senderId64 = senderId;
+        // Используем 32-битный int (asInt) для стопроцентного совпадения с INT в Postgres
+        int chatId = inputJson["chat_id"].asInt();
+        int maxMessageId = inputJson["max_message_id"].asInt();
 
-        drogon::async_run([senderId, senderId64, chatId, maxMessageId]() -> drogon::Task<void> {
+        drogon::async_run([senderId, chatId, maxMessageId]() -> drogon::Task<void> {
             auto dbClient = drogon::app().getDbClient();
 
             try {
                 // Обновляем id последнего прочитанного сообщения у этого пользователя
                 co_await dbClient->execSqlCoro(
                     "UPDATE chat_members SET last_read_message_id = GREATEST(last_read_message_id, $1) WHERE chat_id = $2 AND user_id = $3;",
-                    maxMessageId, chatId, senderId64
+                    maxMessageId, chatId, senderId
                 );
 
                 // Помечаем чужие сообщения прочитанными
                 co_await dbClient->execSqlCoro(
                     "UPDATE messages SET is_read = TRUE WHERE chat_id = $1 AND id <= $2 AND sender_id != $3 AND is_read = FALSE;",
-                    chatId, maxMessageId, senderId64
+                    chatId, maxMessageId, senderId
                 );
 
                 // Достаем всех участников чата
@@ -127,7 +127,7 @@ void ChatWebSocketController::handleNewMessage(const drogon::WebSocketConnection
                     chatId
                 );
 
-                // Рассылаем событие прочтения в реальном времени
+                // Рассылаем событие прочтения всем участникам
                 Json::Value readJson;
                 readJson["type"] = "messages_read";
                 readJson["chat_id"] = chatId;
