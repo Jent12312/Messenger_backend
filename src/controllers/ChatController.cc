@@ -341,7 +341,6 @@ drogon::Task<drogon::HttpResponsePtr> ChatController::joinGroupViaInvite(drogon:
 drogon::Task<drogon::HttpResponsePtr> ChatController::getChatMessages(drogon::HttpRequestPtr req, std::string chatIdStr) {
     auto dbClient = drogon::app().getDbClient();
     
-    // В Postgres поля user_id и chat_id имеют тип INT (32-битное целое в C++)
     int currentUserId = std::stoi(req->attributes()->get<std::string>("user_id"));
     int chatId = std::stoi(chatIdStr);
 
@@ -355,7 +354,7 @@ drogon::Task<drogon::HttpResponsePtr> ChatController::getChatMessages(drogon::Ht
     int64_t beforeId = beforeIdStr.empty() ? 0 : std::stoll(beforeIdStr);
 
     try {
-        // 1. Проверяем членство в чате (оба параметра INT / 32-bit)
+        // 1. Проверяем членство в чате
         auto memberCheck = co_await dbClient->execSqlCoro(
             "SELECT user_id FROM chat_members WHERE chat_id = $1 AND user_id = $2;",
             chatId, currentUserId
@@ -370,48 +369,50 @@ drogon::Task<drogon::HttpResponsePtr> ChatController::getChatMessages(drogon::Ht
             co_return resp;
         }
 
-        // 2. Запрос истории с безопасной подстановкой LIMIT
-        drogon::orm::Result result;
+        // Лямбда-помощник для форматирования списка сообщений в JSON
+        auto buildJsonResponse = [](const drogon::orm::Result& result) {
+            Json::Value jsonMessages(Json::arrayValue);
+            for (int i = static_cast<int>(result.size()) - 1; i >= 0; --i) {
+                auto row = result[i];
+                Json::Value msg;
+                msg["id"] = row["id"].as<int64_t>();
+                msg["chat_id"] = row["chat_id"].as<int>();
+                msg["sender_id"] = row["sender_id"].isNull() ? 0 : row["sender_id"].as<int>();
+                msg["text"] = row["text"].as<std::string>();
+                msg["type"] = row["type"].as<std::string>();
+                msg["file_url"] = row["file_url"].isNull() ? "" : row["file_url"].as<std::string>();
+                msg["is_read"] = row["is_read"].as<bool>();
+                msg["created_at"] = row["created_at"].as<std::string>();
+
+                jsonMessages.append(msg);
+            }
+
+            Json::Value json;
+            json["status"] = "success";
+            json["messages"] = jsonMessages;
+            return drogon::HttpResponse::newHttpJsonResponse(json);
+        };
+
+        // 2. Инициализируем Result сразу при объявлении
         if (beforeId > 0) {
-            result = co_await dbClient->execSqlCoro(
+            auto result = co_await dbClient->execSqlCoro(
                 "SELECT id, chat_id, sender_id, text, type, file_url, is_read, created_at "
                 "FROM messages "
                 "WHERE chat_id = $1 AND id < $2 "
                 "ORDER BY id DESC LIMIT " + std::to_string(limit) + ";",
                 chatId, beforeId
             );
+            co_return buildJsonResponse(result);
         } else {
-            result = co_await dbClient->execSqlCoro(
+            auto result = co_await dbClient->execSqlCoro(
                 "SELECT id, chat_id, sender_id, text, type, file_url, is_read, created_at "
                 "FROM messages "
                 "WHERE chat_id = $1 "
                 "ORDER BY id DESC LIMIT " + std::to_string(limit) + ";",
                 chatId
             );
+            co_return buildJsonResponse(result);
         }
-
-        // 3. Собираем массив сообщений в хронологическом порядке
-        Json::Value jsonMessages(Json::arrayValue);
-        for (int i = static_cast<int>(result.size()) - 1; i >= 0; --i) {
-            auto row = result[i];
-            Json::Value msg;
-            msg["id"] = row["id"].as<int64_t>();
-            msg["chat_id"] = row["chat_id"].as<int>();
-            msg["sender_id"] = row["sender_id"].isNull() ? 0 : row["sender_id"].as<int>();
-            msg["text"] = row["text"].as<std::string>();
-            msg["type"] = row["type"].as<std::string>();
-            msg["file_url"] = row["file_url"].isNull() ? "" : row["file_url"].as<std::string>();
-            msg["is_read"] = row["is_read"].as<bool>();
-            msg["created_at"] = row["created_at"].as<std::string>();
-
-            jsonMessages.append(msg);
-        }
-
-        Json::Value json;
-        json["status"] = "success";
-        json["messages"] = jsonMessages;
-
-        co_return drogon::HttpResponse::newHttpJsonResponse(json);
 
     } catch (const std::exception& e) {
         Json::Value json;
