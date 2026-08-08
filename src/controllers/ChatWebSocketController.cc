@@ -8,7 +8,7 @@ void ChatWebSocketController::handleNewConnection(const drogon::HttpRequestPtr &
     std::string token = req->getParameter("token");
 
     if (token.empty()) {
-        conn->shutdown(drogon::CloseCode::kPolicyViolation, "Missing token");
+        conn->shutdown(drogon::CloseCode::kViolation, "Missing token");
         return;
     }
 
@@ -18,7 +18,7 @@ void ChatWebSocketController::handleNewConnection(const drogon::HttpRequestPtr &
     redisClient->execCommandAsync(
         [conn](const drogon::nosql::RedisResult &r) {
             if (r.type() == drogon::nosql::RedisResultType::kNil) {
-                conn->shutdown(drogon::CloseCode::kPolicyViolation, "Invalid or expired token");
+                conn->shutdown(drogon::CloseCode::kViolation, "Invalid or expired token");
                 return;
             }
 
