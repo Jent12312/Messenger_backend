@@ -341,7 +341,7 @@ drogon::Task<drogon::HttpResponsePtr> ChatController::joinGroupViaInvite(drogon:
 drogon::Task<drogon::HttpResponsePtr> ChatController::getChatMessages(drogon::HttpRequestPtr req, std::string chatIdStr) {
     auto dbClient = drogon::app().getDbClient();
     
-    // Используем int64_t для совместимости с бинарным протоколом Postgres
+    // Используем int64_t для 100% совместимости с бинарным протоколом Postgres
     int64_t currentUserId = std::stoll(req->attributes()->get<std::string>("user_id"));
     int64_t chatId = std::stoll(chatIdStr);
 
@@ -370,48 +370,50 @@ drogon::Task<drogon::HttpResponsePtr> ChatController::getChatMessages(drogon::Ht
             co_return resp;
         }
 
-        // 2. Запрос истории с явной типизацией int64_t для LIMIT
-        drogon::orm::Result result;
+        // Лямбда-помощник для сборки JSON (убираем ошибку пустой инициализации Result)
+        auto buildJsonResponse = [](const drogon::orm::Result& result) {
+            Json::Value jsonMessages(Json::arrayValue);
+            for (int i = static_cast<int>(result.size()) - 1; i >= 0; --i) {
+                auto row = result[i];
+                Json::Value msg;
+                msg["id"] = row["id"].as<int64_t>();
+                msg["chat_id"] = row["chat_id"].as<int64_t>();
+                msg["sender_id"] = row["sender_id"].isNull() ? 0 : row["sender_id"].as<int64_t>();
+                msg["text"] = row["text"].as<std::string>();
+                msg["type"] = row["type"].as<std::string>();
+                msg["file_url"] = row["file_url"].isNull() ? "" : row["file_url"].as<std::string>();
+                msg["is_read"] = row["is_read"].as<bool>();
+                msg["created_at"] = row["created_at"].as<std::string>();
+
+                jsonMessages.append(msg);
+            }
+
+            Json::Value json;
+            json["status"] = "success";
+            json["messages"] = jsonMessages;
+            return drogon::HttpResponse::newHttpJsonResponse(json);
+        };
+
+        // 2. Выполняем запрос с инициализацией через auto
         if (beforeId > 0) {
-            result = co_await dbClient->execSqlCoro(
+            auto result = co_await dbClient->execSqlCoro(
                 "SELECT id, chat_id, sender_id, text, type, file_url, is_read, created_at "
                 "FROM messages "
                 "WHERE chat_id = $1 AND id < $2 "
                 "ORDER BY id DESC LIMIT $3;",
                 chatId, beforeId, limit
             );
+            co_return buildJsonResponse(result);
         } else {
-            result = co_await dbClient->execSqlCoro(
+            auto result = co_await dbClient->execSqlCoro(
                 "SELECT id, chat_id, sender_id, text, type, file_url, is_read, created_at "
                 "FROM messages "
                 "WHERE chat_id = $1 "
                 "ORDER BY id DESC LIMIT $2;",
                 chatId, limit
             );
+            co_return buildJsonResponse(result);
         }
-
-        // 3. Собираем массив сообщений в хронологическом порядке
-        Json::Value jsonMessages(Json::arrayValue);
-        for (int i = static_cast<int>(result.size()) - 1; i >= 0; --i) {
-            auto row = result[i];
-            Json::Value msg;
-            msg["id"] = row["id"].as<int64_t>();
-            msg["chat_id"] = row["chat_id"].as<int64_t>();
-            msg["sender_id"] = row["sender_id"].isNull() ? 0 : row["sender_id"].as<int64_t>();
-            msg["text"] = row["text"].as<std::string>();
-            msg["type"] = row["type"].as<std::string>();
-            msg["file_url"] = row["file_url"].isNull() ? "" : row["file_url"].as<std::string>();
-            msg["is_read"] = row["is_read"].as<bool>();
-            msg["created_at"] = row["created_at"].as<std::string>();
-
-            jsonMessages.append(msg);
-        }
-
-        Json::Value json;
-        json["status"] = "success";
-        json["messages"] = jsonMessages;
-
-        co_return drogon::HttpResponse::newHttpJsonResponse(json);
 
     } catch (const std::exception& e) {
         Json::Value json;
