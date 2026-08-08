@@ -8,18 +8,17 @@ void ChatWebSocketController::handleNewConnection(const drogon::HttpRequestPtr &
     std::string token = req->getParameter("token");
 
     if (token.empty()) {
-        conn->shutdown(drogon::CloseCode::kViolationOfPolicy, "Missing token");
+        conn->shutdown(drogon::CloseCode::kPolicyViolation, "Missing token");
         return;
     }
 
     auto redisClient = drogon::app().getRedisClient();
     std::string redisKey = "session:" + token;
 
-    // Асинхронно проверяем токен в Redis перед одобрением сокета
     redisClient->execCommandAsync(
         [conn](const drogon::nosql::RedisResult &r) {
             if (r.type() == drogon::nosql::RedisResultType::kNil) {
-                conn->shutdown(drogon::CloseCode::kViolationOfPolicy, "Invalid or expired token");
+                conn->shutdown(drogon::CloseCode::kPolicyViolation, "Invalid or expired token");
                 return;
             }
 
@@ -53,27 +52,25 @@ void ChatWebSocketController::handleNewMessage(const drogon::WebSocketConnection
     }
     int senderId = *(conn->getContext<int>());
 
-    // Парсим входящий JSON
     Json::Value inputJson;
     Json::CharReaderBuilder builder;
     std::string errs;
     std::unique_ptr<Json::CharReader> reader(builder.newCharReader());
 
     if (!reader->parse(message.c_str(), message.c_str() + message.size(), &inputJson, &errs)) {
-        return; // Игнорируем невалидный JSON
+        return;
     }
 
     std::string action = inputJson["action"].asString();
 
-    // Обработка действия "send_message"
     if (action == "send_message") {
         int chatId = inputJson["chat_id"].asInt();
         std::string text = inputJson["text"].asString();
 
         if (text.empty()) return;
 
-        // Запускаем асинхронную сорутину для сохранения и рассылки
-        drogon::asyncRun([senderId, chatId, text]() -> drogon::Task<void> {
+        // Запускаем асинхронную сорутину (исправлено на async_run)
+        drogon::async_run([senderId, chatId, text]() -> drogon::Task<void> {
             auto dbClient = drogon::app().getDbClient();
 
             try {
@@ -115,6 +112,5 @@ void ChatWebSocketController::handleNewMessage(const drogon::WebSocketConnection
 }
 
 void ChatWebSocketController::handleConnectionClosed(const drogon::WebSocketConnectionPtr &conn) {
-    // Удаляем из реестра при отключении
     WebSocketManager::instance().removeConnection(conn);
 }
