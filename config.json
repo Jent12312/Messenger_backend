@@ -18,7 +18,7 @@
         {
             "name": "default",
             "rdbms": "postgresql",
-            "host": "f11zyl5wmix2dtocntebd9ex", 
+            "host": "u6wqcopyswfkphftvtlqqmas", 
             "port": 5432,
             "dbname": "postgres",
             "user": "postgres",
@@ -29,7 +29,7 @@
     "redis_clients": [
         {
             "name": "default",
-            "host": "lv3w46r2acs03r6frasuajqj",
+            "host": "iifrorwqwcdaojpg37ovymab",
             "port": 6379,
             "passwd": "vkrrt8auoXSNLkwJryyAu7HaXW0nHdzVc10R1eUBK7TKPQaaw6aqm0LJ9uHPiE64",
             "db": 0,
