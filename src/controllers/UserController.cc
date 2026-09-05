@@ -210,7 +210,7 @@ drogon::Task<drogon::HttpResponsePtr> UserController::uploadAvatar(drogon::HttpR
     }
 
     auto file = fileUpload.getFiles()[0];
-    std::string ext = file.getFileExtension();
+    std::string ext(file.getFileExtension());
     
     // Валидация расширения картинки
     if (ext != "jpg" && ext != "jpeg" && ext != "png" && ext != "webp") {
