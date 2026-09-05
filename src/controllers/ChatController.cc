@@ -534,7 +534,7 @@ drogon::Task<drogon::HttpResponsePtr> ChatController::uploadChatFile(drogon::Htt
         }
 
         auto file = fileUpload.getFiles()[0];
-        std::string ext = file.getFileExtension();
+        std::string ext(file.getFileExtension());
         std::string originalName = file.getFileName();
 
         // Приводим расширение к нижнему регистру
@@ -625,7 +625,7 @@ drogon::Task<drogon::HttpResponsePtr> ChatController::uploadGroupAvatar(drogon::
         }
 
         auto file = fileUpload.getFiles()[0];
-        std::string ext = file.getFileExtension();
+        std::string ext(file.getFileExtension());
         std::string newFileName = "group_" + std::to_string(chatId) + "_" + CryptoUtils::generateSessionToken().substr(0, 8) + "." + ext;
 
         file.saveAs("avatars/" + newFileName);
