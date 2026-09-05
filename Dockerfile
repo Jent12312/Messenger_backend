@@ -19,4 +19,5 @@ EXPOSE 8080
 
 # Указываем рабочую папку для запуска и команду
 WORKDIR /app/build
+RUN mkdir -p uploads/avatars uploads/files
 CMD ["./messenger_backend"]

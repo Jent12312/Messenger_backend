@@ -10,8 +10,7 @@ public:
     ADD_METHOD_TO(ChatController::getChatList, "/api/v1/chats", drogon::Get, "AuthFilter");
     ADD_METHOD_TO(ChatController::createGroupInvite, "/api/v1/chats/group/{1}/invite", drogon::Post, "AuthFilter");
     ADD_METHOD_TO(ChatController::joinGroupViaInvite, "/api/v1/chats/group/join/{1}", drogon::Post, "AuthFilter");
-    
-    // ДОБАВЛЕН РОУТ ДЛЯ ИСТОРИИ СООБЩЕНИЙ
+    ADD_METHOD_TO(ChatController::togglePinChat, "/api/v1/chats/{1}/pin", drogon::Put, "AuthFilter");
     ADD_METHOD_TO(ChatController::getChatMessages, "/api/v1/chats/{1}/messages", drogon::Get, "AuthFilter");
     METHOD_LIST_END
 
@@ -20,7 +19,6 @@ public:
     drogon::Task<drogon::HttpResponsePtr> getChatList(drogon::HttpRequestPtr req);
     drogon::Task<drogon::HttpResponsePtr> createGroupInvite(drogon::HttpRequestPtr req, std::string chatIdStr);
     drogon::Task<drogon::HttpResponsePtr> joinGroupViaInvite(drogon::HttpRequestPtr req, std::string inviteCode);
-    
-    // ДОБАВЛЕНО ОБЪЯВЛЕНИЕ МЕТОДА
+    drogon::Task<drogon::HttpResponsePtr> togglePinChat(drogon::HttpRequestPtr req, std::string chatIdStr);
     drogon::Task<drogon::HttpResponsePtr> getChatMessages(drogon::HttpRequestPtr req, std::string chatIdStr);
 };

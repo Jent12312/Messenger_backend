@@ -445,3 +445,44 @@ drogon::Task<drogon::HttpResponsePtr> ChatController::getChatMessages(drogon::Ht
         co_return resp;
     }
 }
+
+// Закрепление / Открепление чата (Pin / Unpin)
+drogon::Task<drogon::HttpResponsePtr> ChatController::togglePinChat(drogon::HttpRequestPtr req, std::string chatIdStr) {
+    auto dbClient = drogon::app().getDbClient();
+    int currentUserId = std::stoi(req->attributes()->get<std::string>("user_id"));
+    int chatId = std::stoi(chatIdStr);
+
+    try {
+        // Переключаем значение is_pinned на противоположное (NOT is_pinned)
+        auto result = co_await dbClient->execSqlCoro(
+            "UPDATE chat_members SET is_pinned = NOT is_pinned WHERE chat_id = $1 AND user_id = $2 RETURNING is_pinned;",
+            chatId, currentUserId
+        );
+
+        if (result.size() == 0) {
+            Json::Value json;
+            json["status"] = "error";
+            json["message"] = "Chat not found or you are not a member";
+            auto resp = drogon::HttpResponse::newHttpJsonResponse(json);
+            resp->setStatusCode(drogon::k404NotFound);
+            co_return resp;
+        }
+
+        bool isPinned = result[0]["is_pinned"].as<bool>();
+
+        Json::Value json;
+        json["status"] = "success";
+        json["is_pinned"] = isPinned;
+        json["message"] = isPinned ? "Chat pinned" : "Chat unpinned";
+
+        co_return drogon::HttpResponse::newHttpJsonResponse(json);
+
+    } catch (const std::exception& e) {
+        Json::Value json;
+        json["status"] = "error";
+        json["message"] = "Database error: " + std::string(e.what());
+        auto resp = drogon::HttpResponse::newHttpJsonResponse(json);
+        resp->setStatusCode(drogon::k500InternalServerError);
+        co_return resp;
+    }
+}
