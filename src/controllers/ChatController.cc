@@ -1,6 +1,7 @@
 #include "ChatController.h"
 #include "../utils/CryptoUtils.h"
 #include <algorithm>
+#include "../utils/WebSocketManager.h"
 
 drogon::Task<drogon::HttpResponsePtr> ChatController::createPersonalChat(drogon::HttpRequestPtr req) {
     auto dbClient = drogon::app().getDbClient();
