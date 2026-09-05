@@ -346,7 +346,6 @@ drogon::Task<drogon::HttpResponsePtr> ChatController::getChatMessages(drogon::Ht
     int limit = 50;
     int64_t beforeId = 0;
 
-    // Безопасный перехват ошибок типа данных в параметрах URL
     try {
         currentUserId = std::stoi(req->attributes()->get<std::string>("user_id"));
         chatId = std::stoi(chatIdStr);
@@ -384,21 +383,27 @@ drogon::Task<drogon::HttpResponsePtr> ChatController::getChatMessages(drogon::Ht
             co_return resp;
         }
 
-        auto result = (beforeId > 0) 
-            ? co_await dbClient->execSqlCoro(
-                "SELECT id, chat_id, sender_id, text, type, file_url, is_read, created_at "
-                "FROM messages "
-                "WHERE chat_id = $1 AND id < $2 "
-                "ORDER BY id DESC LIMIT " + std::to_string(limit) + ";",
+        // Запрос с получением агрегированных реакций через JSON в PostgreSQL
+        std::string baseSql = 
+            "SELECT m.id, m.chat_id, m.sender_id, m.text, m.type, m.file_url, m.is_read, m.is_edited, m.created_at, "
+            "COALESCE(( "
+            "   SELECT json_agg(json_build_object('emoji', r.emoji, 'count', r.cnt)) "
+            "   FROM (SELECT emoji, COUNT(*) AS cnt FROM message_reactions WHERE message_id = m.id GROUP BY emoji) r "
+            "), '[]'::json) AS reactions "
+            "FROM messages m ";
+
+        drogon::orm::Result result;
+        if (beforeId > 0) {
+            result = co_await dbClient->execSqlCoro(
+                baseSql + "WHERE m.chat_id = $1 AND m.id < $2 ORDER BY m.id DESC LIMIT " + std::to_string(limit) + ";",
                 chatId, beforeId
-            )
-            : co_await dbClient->execSqlCoro(
-                "SELECT id, chat_id, sender_id, text, type, file_url, is_read, created_at "
-                "FROM messages "
-                "WHERE chat_id = $1 "
-                "ORDER BY id DESC LIMIT " + std::to_string(limit) + ";",
+            );
+        } else {
+            result = co_await dbClient->execSqlCoro(
+                baseSql + "WHERE m.chat_id = $1 ORDER BY m.id DESC LIMIT " + std::to_string(limit) + ";",
                 chatId
             );
+        }
 
         Json::Value jsonMessages(Json::arrayValue);
         for (int i = static_cast<int>(result.size()) - 1; i >= 0; --i) {
@@ -411,7 +416,18 @@ drogon::Task<drogon::HttpResponsePtr> ChatController::getChatMessages(drogon::Ht
             msg["type"] = row["type"].as<std::string>();
             msg["file_url"] = row["file_url"].isNull() ? "" : row["file_url"].as<std::string>();
             msg["is_read"] = row["is_read"].as<bool>();
+            msg["is_edited"] = row["is_edited"].as<bool>();
             msg["created_at"] = row["created_at"].as<std::string>();
+
+            // Парсим агрегированный JSON реакций от Postgres
+            std::string reactionsStr = row["reactions"].as<std::string>();
+            Json::Value reactionsJson;
+            Json::CharReaderBuilder builder;
+            std::string errs;
+            std::unique_ptr<Json::CharReader> reader(builder.newCharReader());
+            reader->parse(reactionsStr.c_str(), reactionsStr.c_str() + reactionsStr.size(), &reactionsJson, &errs);
+            
+            msg["reactions"] = reactionsJson;
 
             jsonMessages.append(msg);
         }
