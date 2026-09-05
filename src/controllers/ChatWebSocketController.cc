@@ -190,7 +190,7 @@ void ChatWebSocketController::handleNewMessage(const drogon::WebSocketConnection
                     chatId, senderId
                 );
 
-                if (memberCheck.size() == 0) return;
+                if (memberCheck.size() == 0) co_return;
 
                 // Проверяем существование предыдущей реакции
                 auto existReaction = co_await dbClient->execSqlCoro(
@@ -263,7 +263,7 @@ void ChatWebSocketController::handleNewMessage(const drogon::WebSocketConnection
                     chatId, senderId
                 );
 
-                if (memberCheck.size() == 0) return;
+                if (memberCheck.size() == 0) co_return;
 
                 co_await dbClient->execSqlCoro(
                     "UPDATE chat_members SET last_read_message_id = GREATEST(last_read_message_id, $1) WHERE chat_id = $2 AND user_id = $3;",
