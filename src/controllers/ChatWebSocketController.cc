@@ -22,14 +22,21 @@ void ChatWebSocketController::handleNewConnection(const drogon::HttpRequestPtr &
                 return;
             }
 
-            int userId = std::stoi(r.asString());
-            WebSocketManager::instance().addConnection(userId, conn);
+            // Безопасный парсинг с защитой от поврежденных данных в Redis
+            try {
+                int userId = std::stoi(r.asString());
+                WebSocketManager::instance().addConnection(userId, conn);
 
-            Json::Value response;
-            response["type"] = "connection_ack";
-            response["status"] = "connected";
-            response["user_id"] = userId;
-            conn->sendJson(response);
+                Json::Value response;
+                response["type"] = "connection_ack";
+                response["status"] = "connected";
+                response["user_id"] = userId;
+                conn->sendJson(response);
+
+            } catch (const std::exception &e) {
+                LOG_ERROR << "Corrupted session data in Redis: " << e.what();
+                conn->shutdown(drogon::CloseCode::kViolation, "Corrupted session data");
+            }
         },
         [conn](const drogon::nosql::RedisException &e) {
             conn->shutdown(drogon::CloseCode::kUnexpectedCondition, "Internal error");
@@ -68,7 +75,7 @@ void ChatWebSocketController::handleNewMessage(const drogon::WebSocketConnection
             auto dbClient = drogon::app().getDbClient();
 
             try {
-                // ПРОВЕРКА БЕЗОПАСНОСТИ: Входит ли отправитель в этот чат?
+                // Проверка прав доступа
                 auto memberCheck = co_await dbClient->execSqlCoro(
                     "SELECT 1 FROM chat_members WHERE chat_id = $1 AND user_id = $2;",
                     chatId, senderId
@@ -79,10 +86,9 @@ void ChatWebSocketController::handleNewMessage(const drogon::WebSocketConnection
                     errJson["type"] = "error";
                     errJson["message"] = "Forbidden: You are not a member of this chat";
                     WebSocketManager::instance().sendToUser(senderId, errJson);
-                    co_return; // Отклоняем выполнение
+                    co_return;
                 }
 
-                // 1. Сохраняем сообщение в PostgreSQL
                 auto msgRes = co_await dbClient->execSqlCoro(
                     "INSERT INTO messages (chat_id, sender_id, text) VALUES ($1, $2, $3) RETURNING id, created_at;",
                     chatId, senderId, text
@@ -91,7 +97,6 @@ void ChatWebSocketController::handleNewMessage(const drogon::WebSocketConnection
                 int msgId = msgRes[0]["id"].as<int>();
                 std::string createdAt = msgRes[0]["created_at"].as<std::string>();
 
-                // 2. Достаем всех участников этого чата
                 auto membersRes = co_await dbClient->execSqlCoro(
                     "SELECT user_id FROM chat_members WHERE chat_id = $1;",
                     chatId
@@ -105,7 +110,6 @@ void ChatWebSocketController::handleNewMessage(const drogon::WebSocketConnection
                 outJson["text"] = text;
                 outJson["created_at"] = createdAt;
 
-                // 3. Рассылаем участникам
                 for (auto row : membersRes) {
                     int memberId = row["user_id"].as<int>();
                     WebSocketManager::instance().sendToUser(memberId, outJson);
@@ -125,7 +129,7 @@ void ChatWebSocketController::handleNewMessage(const drogon::WebSocketConnection
             auto dbClient = drogon::app().getDbClient();
 
             try {
-                // ПРОВЕРКА БЕЗОПАСНОСТИ: Входит ли читающий в этот чат?
+                // Проверка прав доступа
                 auto memberCheck = co_await dbClient->execSqlCoro(
                     "SELECT 1 FROM chat_members WHERE chat_id = $1 AND user_id = $2;",
                     chatId, senderId
@@ -136,16 +140,14 @@ void ChatWebSocketController::handleNewMessage(const drogon::WebSocketConnection
                     errJson["type"] = "error";
                     errJson["message"] = "Forbidden: You are not a member of this chat";
                     WebSocketManager::instance().sendToUser(senderId, errJson);
-                    co_return; // Отклоняем выполнение
+                    co_return;
                 }
 
-                // Обновляем id последнего прочитанного сообщения
                 co_await dbClient->execSqlCoro(
                     "UPDATE chat_members SET last_read_message_id = GREATEST(last_read_message_id, $1) WHERE chat_id = $2 AND user_id = $3;",
                     maxMessageId, chatId, senderId
                 );
 
-                // Помечаем чужие сообщения прочитанными
                 co_await dbClient->execSqlCoro(
                     "UPDATE messages SET is_read = TRUE WHERE chat_id = $1 AND id <= $2 AND sender_id != $3 AND is_read = FALSE;",
                     chatId, maxMessageId, senderId
