@@ -3,31 +3,37 @@
 drogon::Task<drogon::HttpResponsePtr> UserController::getProfile(drogon::HttpRequestPtr req) {
     auto dbClient = drogon::app().getDbClient();
 
-    // Безопасно проверяем, существует ли ключ "user_id" в атрибутах запроса
     if (!req->attributes()->find("user_id")) {
         Json::Value json;
         json["status"] = "error";
         json["message"] = "User ID not found in request context";
-        
         auto resp = drogon::HttpResponse::newHttpJsonResponse(json);
         resp->setStatusCode(drogon::k500InternalServerError);
         co_return resp;
     }
 
-    // Извлекаем значение (теперь это абсолютно безопасно)
-    std::string userIdStr = req->attributes()->get<std::string>("user_id");
+    int userId = 0;
+    try {
+        userId = std::stoi(req->attributes()->get<std::string>("user_id"));
+    } catch (const std::exception&) {
+        Json::Value json;
+        json["status"] = "error";
+        json["message"] = "Invalid user ID format";
+        auto resp = drogon::HttpResponse::newHttpJsonResponse(json);
+        resp->setStatusCode(drogon::k400BadRequest);
+        co_return resp;
+    }
 
     try {
         auto result = co_await dbClient->execSqlCoro(
             "SELECT id, username, first_name, last_name, user_code, bio, dob FROM users WHERE id = $1;",
-            std::stoi(userIdStr)
+            userId
         );
 
         if (result.size() == 0) {
             Json::Value json;
             json["status"] = "error";
             json["message"] = "User not found";
-            
             auto resp = drogon::HttpResponse::newHttpJsonResponse(json);
             resp->setStatusCode(drogon::k404NotFound);
             co_return resp;
@@ -54,7 +60,6 @@ drogon::Task<drogon::HttpResponsePtr> UserController::getProfile(drogon::HttpReq
         Json::Value json;
         json["status"] = "error";
         json["message"] = "Database error: " + std::string(e.what());
-        
         auto resp = drogon::HttpResponse::newHttpJsonResponse(json);
         resp->setStatusCode(drogon::k500InternalServerError);
         co_return resp;
@@ -72,7 +77,15 @@ drogon::Task<drogon::HttpResponsePtr> UserController::searchUsers(drogon::HttpRe
         co_return drogon::HttpResponse::newHttpJsonResponse(json);
     }
 
-    // Лямбда-помощник для сборки JSON-ответа (чтобы избежать дублирования кода)
+    // Экранируем спецсимволы % и _ для защиты от нечестных поисковых запросов вида %%%
+    std::string escapedQuery = "";
+    for (char c : query) {
+        if (c == '%' || c == '_') {
+            escapedQuery += '\\';
+        }
+        escapedQuery += c;
+    }
+
     auto buildJsonResponse = [](const drogon::orm::Result& result) {
         Json::Value jsonUsers(Json::arrayValue);
         for (auto row : result) {
@@ -82,7 +95,6 @@ drogon::Task<drogon::HttpResponsePtr> UserController::searchUsers(drogon::HttpRe
             user["first_name"] = row["first_name"].as<std::string>();
             user["last_name"] = row["last_name"].isNull() ? "" : row["last_name"].as<std::string>();
             user["user_code"] = row["user_code"].as<std::string>();
-            
             jsonUsers.append(user);
         }
 
@@ -93,18 +105,15 @@ drogon::Task<drogon::HttpResponsePtr> UserController::searchUsers(drogon::HttpRe
     };
 
     try {
-        // Если поиск по уникальному коду пользователя
-        if (query.rfind("USR-", 0) == 0) {
+        if (escapedQuery.rfind("USR-", 0) == 0) {
             auto result = co_await dbClient->execSqlCoro(
                 "SELECT id, username, first_name, last_name, user_code "
                 "FROM users WHERE user_code = $1 LIMIT 1;",
-                query
+                escapedQuery
             );
             co_return buildJsonResponse(result);
-        } 
-        // Иначе нечеткий поиск по имени / фамилии / юзернейму
-        else {
-            std::string likeQuery = "%" + query + "%";
+        } else {
+            std::string likeQuery = "%" + escapedQuery + "%";
             auto result = co_await dbClient->execSqlCoro(
                 "SELECT id, username, first_name, last_name, user_code "
                 "FROM users "
@@ -119,7 +128,6 @@ drogon::Task<drogon::HttpResponsePtr> UserController::searchUsers(drogon::HttpRe
         Json::Value json;
         json["status"] = "error";
         json["message"] = "Database error: " + std::string(e.what());
-        
         auto resp = drogon::HttpResponse::newHttpJsonResponse(json);
         resp->setStatusCode(drogon::k500InternalServerError);
         co_return resp;
