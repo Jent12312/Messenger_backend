@@ -392,18 +392,16 @@ drogon::Task<drogon::HttpResponsePtr> ChatController::getChatMessages(drogon::Ht
             "), '[]'::json) AS reactions "
             "FROM messages m ";
 
-        drogon::orm::Result result;
-        if (beforeId > 0) {
-            result = co_await dbClient->execSqlCoro(
+        // Инициализируем result сразу через тернарный оператор (без создания пустого drogon::orm::Result)
+        auto result = (beforeId > 0)
+            ? co_await dbClient->execSqlCoro(
                 baseSql + "WHERE m.chat_id = $1 AND m.id < $2 ORDER BY m.id DESC LIMIT " + std::to_string(limit) + ";",
                 chatId, beforeId
-            );
-        } else {
-            result = co_await dbClient->execSqlCoro(
+            )
+            : co_await dbClient->execSqlCoro(
                 baseSql + "WHERE m.chat_id = $1 ORDER BY m.id DESC LIMIT " + std::to_string(limit) + ";",
                 chatId
             );
-        }
 
         Json::Value jsonMessages(Json::arrayValue);
         for (int i = static_cast<int>(result.size()) - 1; i >= 0; --i) {
