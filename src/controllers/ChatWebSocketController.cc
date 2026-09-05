@@ -307,5 +307,28 @@ void ChatWebSocketController::handleNewMessage(const drogon::WebSocketConnection
 }
 
 void ChatWebSocketController::handleConnectionClosed(const drogon::WebSocketConnectionPtr &conn) {
+    if (!conn->hasContext()) {
+        return;
+    }
+
+    int userId = *(conn->getContext<int>());
+    
+    // Удаляем сокет из реестра
     WebSocketManager::instance().removeConnection(conn);
+
+    // Если у пользователя не осталось активных вкладок/устройств — он ушел в оффлайн
+    if (!WebSocketManager::instance().isUserOnline(userId)) {
+        drogon::async_run([userId]() -> drogon::Task<void> {
+            auto dbClient = drogon::app().getDbClient();
+            try {
+                // Обновляем время последней активности
+                co_await dbClient->execSqlCoro(
+                    "UPDATE users SET last_seen = CURRENT_TIMESTAMP WHERE id = $1;",
+                    userId
+                );
+            } catch (const std::exception& e) {
+                LOG_ERROR << "Failed to update last_seen for user " << userId << ": " << e.what();
+            }
+        });
+    }
 }
