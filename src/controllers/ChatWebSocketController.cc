@@ -63,14 +63,19 @@ void ChatWebSocketController::handleNewMessage(const drogon::WebSocketConnection
 
     std::string action = inputJson["action"].asString();
 
-    // 1. ОТПРАВКА СООБЩЕНИЯ (поддерживает любые эмодзи 👍❤️🔥)
+    // 1. ОТПРАВКА СООБЩЕНИЯ (ТЕКСТ + МЕДИАФАЙЛЫ ДО 500 МБ)
     if (action == "send_message") {
         int chatId = inputJson["chat_id"].asInt();
-        std::string text = inputJson["text"].asString();
+        std::string text = inputJson["text"].isNull() ? "" : inputJson["text"].asString();
+        
+        // Поддержка типов: text, image, video, voice, file
+        std::string msgType = inputJson["type"].isNull() ? "text" : inputJson["type"].asString();
+        std::string fileUrl = inputJson["file_url"].isNull() ? "" : inputJson["file_url"].asString();
 
-        if (text.empty()) return;
+        // Сообщение не может быть одновременно без текста и без файла
+        if (text.empty() && fileUrl.empty()) return;
 
-        drogon::async_run([senderId, chatId, text]() -> drogon::Task<void> {
+        drogon::async_run([senderId, chatId, text, msgType, fileUrl]() -> drogon::Task<void> {
             auto dbClient = drogon::app().getDbClient();
 
             try {
@@ -87,9 +92,10 @@ void ChatWebSocketController::handleNewMessage(const drogon::WebSocketConnection
                     co_return;
                 }
 
+                // Сохраняем сообщение с типом и ссылкой на файл
                 auto msgRes = co_await dbClient->execSqlCoro(
-                    "INSERT INTO messages (chat_id, sender_id, text) VALUES ($1, $2, $3) RETURNING id, created_at;",
-                    chatId, senderId, text
+                    "INSERT INTO messages (chat_id, sender_id, text, type, file_url) VALUES ($1, $2, $3, $4, $5) RETURNING id, created_at;",
+                    chatId, senderId, text, msgType, fileUrl
                 );
 
                 int msgId = msgRes[0]["id"].as<int>();
@@ -106,6 +112,8 @@ void ChatWebSocketController::handleNewMessage(const drogon::WebSocketConnection
                 outJson["chat_id"] = chatId;
                 outJson["sender_id"] = senderId;
                 outJson["text"] = text;
+                outJson["message_type"] = msgType;
+                outJson["file_url"] = fileUrl;
                 outJson["is_edited"] = false;
                 outJson["created_at"] = createdAt;
 

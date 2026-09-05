@@ -1,5 +1,6 @@
 #include "ChatController.h"
 #include "../utils/CryptoUtils.h"
+#include <algorithm>
 
 drogon::Task<drogon::HttpResponsePtr> ChatController::createPersonalChat(drogon::HttpRequestPtr req) {
     auto dbClient = drogon::app().getDbClient();
@@ -481,6 +482,275 @@ drogon::Task<drogon::HttpResponsePtr> ChatController::togglePinChat(drogon::Http
         Json::Value json;
         json["status"] = "error";
         json["message"] = "Database error: " + std::string(e.what());
+        auto resp = drogon::HttpResponse::newHttpJsonResponse(json);
+        resp->setStatusCode(drogon::k500InternalServerError);
+        co_return resp;
+    }
+}
+
+// 1. ЗАГРУЗКА МЕДИАФАЙЛОВ В ЧАТ (ДО 500 МБ)
+drogon::Task<drogon::HttpResponsePtr> ChatController::uploadChatFile(drogon::HttpRequestPtr req, std::string chatIdStr) {
+    auto dbClient = drogon::app().getDbClient();
+    int currentUserId = 0;
+    int chatId = 0;
+
+    try {
+        currentUserId = std::stoi(req->attributes()->get<std::string>("user_id"));
+        chatId = std::stoi(chatIdStr);
+    } catch (const std::exception&) {
+        Json::Value json;
+        json["status"] = "error";
+        json["message"] = "Invalid chat ID format";
+        auto resp = drogon::HttpResponse::newHttpJsonResponse(json);
+        resp->setStatusCode(drogon::k400BadRequest);
+        co_return resp;
+    }
+
+    try {
+        // Проверяем членство в чате
+        auto memberCheck = co_await dbClient->execSqlCoro(
+            "SELECT 1 FROM chat_members WHERE chat_id = $1 AND user_id = $2;",
+            chatId, currentUserId
+        );
+
+        if (memberCheck.size() == 0) {
+            Json::Value json;
+            json["status"] = "error";
+            json["message"] = "Forbidden: You are not a member of this chat";
+            auto resp = drogon::HttpResponse::newHttpJsonResponse(json);
+            resp->setStatusCode(drogon::k403Forbidden);
+            co_return resp;
+        }
+
+        // Парсинг multipart/form-data
+        drogon::MultiPartParser fileUpload;
+        if (fileUpload.parse(req) != 0 || fileUpload.getFiles().empty()) {
+            Json::Value json;
+            json["status"] = "error";
+            json["message"] = "Missing file attachment (field 'file')";
+            auto resp = drogon::HttpResponse::newHttpJsonResponse(json);
+            resp->setStatusCode(drogon::k400BadRequest);
+            co_return resp;
+        }
+
+        auto file = fileUpload.getFiles()[0];
+        std::string ext = file.getFileExtension();
+        std::string originalName = file.getFileName();
+
+        // Приводим расширение к нижнему регистру
+        std::string lowerExt = ext;
+        std::transform(lowerExt.begin(), lowerExt.end(), lowerExt.begin(), ::tolower);
+
+        // Автоматически определяем тип медиа
+        std::string msgType = "file";
+        if (lowerExt == "jpg" || lowerExt == "jpeg" || lowerExt == "png" || lowerExt == "webp" || lowerExt == "gif") {
+            msgType = "image";
+        } else if (lowerExt == "mp4" || lowerExt == "webm" || lowerExt == "mov" || lowerExt == "mkv") {
+            msgType = "video";
+        } else if (lowerExt == "mp3" || lowerExt == "ogg" || lowerExt == "wav" || lowerExt == "m4a") {
+            msgType = "voice";
+        }
+
+        // Генерируем уникальное имя файла
+        std::string uniqueToken = CryptoUtils::generateSessionToken().substr(0, 16);
+        std::string newFileName = "chat_" + std::to_string(chatId) + "_" + uniqueToken + "." + lowerExt;
+
+        // Потоковое сохранение в папку uploads/files/
+        file.saveAs("files/" + newFileName);
+
+        std::string fileUrl = "https://aegischat.jents.online/uploads/files/" + newFileName;
+
+        Json::Value json;
+        json["status"] = "success";
+        json["file_url"] = fileUrl;
+        json["file_type"] = msgType;
+        json["file_name"] = originalName;
+
+        co_return drogon::HttpResponse::newHttpJsonResponse(json);
+
+    } catch (const std::exception& e) {
+        Json::Value json;
+        json["status"] = "error";
+        json["message"] = "Server error: " + std::string(e.what());
+        auto resp = drogon::HttpResponse::newHttpJsonResponse(json);
+        resp->setStatusCode(drogon::k500InternalServerError);
+        co_return resp;
+    }
+}
+
+// 2. ЗАГРУЗКА АВАТАРКИ ГРУППЫ
+drogon::Task<drogon::HttpResponsePtr> ChatController::uploadGroupAvatar(drogon::HttpRequestPtr req, std::string chatIdStr) {
+    auto dbClient = drogon::app().getDbClient();
+    int currentUserId = 0;
+    int chatId = 0;
+
+    try {
+        currentUserId = std::stoi(req->attributes()->get<std::string>("user_id"));
+        chatId = std::stoi(chatIdStr);
+    } catch (const std::exception&) {
+        Json::Value json;
+        json["status"] = "error";
+        json["message"] = "Invalid chat ID format";
+        auto resp = drogon::HttpResponse::newHttpJsonResponse(json);
+        resp->setStatusCode(drogon::k400BadRequest);
+        co_return resp;
+    }
+
+    try {
+        // Проверяем, что чат — группа, а пользователь — админ или создатель
+        auto checkAdmin = co_await dbClient->execSqlCoro(
+            "SELECT cm.role FROM chat_members cm "
+            "JOIN chats c ON cm.chat_id = c.id "
+            "WHERE cm.chat_id = $1 AND cm.user_id = $2 AND c.type = 'group' AND cm.role IN ('admin', 'creator');",
+            chatId, currentUserId
+        );
+
+        if (checkAdmin.size() == 0) {
+            Json::Value json;
+            json["status"] = "error";
+            json["message"] = "Forbidden: Only group admins can update group avatar";
+            auto resp = drogon::HttpResponse::newHttpJsonResponse(json);
+            resp->setStatusCode(drogon::k403Forbidden);
+            co_return resp;
+        }
+
+        drogon::MultiPartParser fileUpload;
+        if (fileUpload.parse(req) != 0 || fileUpload.getFiles().empty()) {
+            Json::Value json;
+            json["status"] = "error";
+            json["message"] = "Missing file attachment (field 'avatar')";
+            auto resp = drogon::HttpResponse::newHttpJsonResponse(json);
+            resp->setStatusCode(drogon::k400BadRequest);
+            co_return resp;
+        }
+
+        auto file = fileUpload.getFiles()[0];
+        std::string ext = file.getFileExtension();
+        std::string newFileName = "group_" + std::to_string(chatId) + "_" + CryptoUtils::generateSessionToken().substr(0, 8) + "." + ext;
+
+        file.saveAs("avatars/" + newFileName);
+        std::string avatarUrl = "https://aegischat.jents.online/uploads/avatars/" + newFileName;
+
+        co_await dbClient->execSqlCoro("UPDATE chats SET avatar_url = $1 WHERE id = $2;", avatarUrl, chatId);
+
+        Json::Value json;
+        json["status"] = "success";
+        json["avatar_url"] = avatarUrl;
+        json["message"] = "Group avatar updated successfully";
+
+        co_return drogon::HttpResponse::newHttpJsonResponse(json);
+
+    } catch (const std::exception& e) {
+        Json::Value json;
+        json["status"] = "error";
+        json["message"] = "Server error: " + std::string(e.what());
+        auto resp = drogon::HttpResponse::newHttpJsonResponse(json);
+        resp->setStatusCode(drogon::k500InternalServerError);
+        co_return resp;
+    }
+}
+
+// 3. НАЗНАЧЕНИЕ РОЛИ (ADMIN / MEMBER)
+drogon::Task<drogon::HttpResponsePtr> ChatController::updateMemberRole(drogon::HttpRequestPtr req, std::string chatIdStr, std::string targetUserIdStr) {
+    auto dbClient = drogon::app().getDbClient();
+    int currentUserId = std::stoi(req->attributes()->get<std::string>("user_id"));
+    int chatId = std::stoi(chatIdStr);
+    int targetUserId = std::stoi(targetUserIdStr);
+
+    auto jsonBody = req->getJsonObject();
+    if (!jsonBody || !(*jsonBody)["role"]) {
+        Json::Value json;
+        json["status"] = "error";
+        json["message"] = "Missing 'role' field (admin or member)";
+        auto resp = drogon::HttpResponse::newHttpJsonResponse(json);
+        resp->setStatusCode(drogon::k400BadRequest);
+        co_return resp;
+    }
+
+    std::string newRole = (*jsonBody)["role"].asString();
+    if (newRole != "admin" && newRole != "member") {
+        Json::Value json;
+        json["status"] = "error";
+        json["message"] = "Invalid role. Allowed: admin, member";
+        auto resp = drogon::HttpResponse::newHttpJsonResponse(json);
+        resp->setStatusCode(drogon::k400BadRequest);
+        co_return resp;
+    }
+
+    try {
+        // Только создатель группы ('creator') может назначать и снимать админов
+        auto checkCreator = co_await dbClient->execSqlCoro(
+            "SELECT 1 FROM chat_members WHERE chat_id = $1 AND user_id = $2 AND role = 'creator';",
+            chatId, currentUserId
+        );
+
+        if (checkCreator.size() == 0) {
+            Json::Value json;
+            json["status"] = "error";
+            json["message"] = "Forbidden: Only group creator can change member roles";
+            auto resp = drogon::HttpResponse::newHttpJsonResponse(json);
+            resp->setStatusCode(drogon::k403Forbidden);
+            co_return resp;
+        }
+
+        co_await dbClient->execSqlCoro(
+            "UPDATE chat_members SET role = $1 WHERE chat_id = $2 AND user_id = $3;",
+            newRole, chatId, targetUserId
+        );
+
+        Json::Value json;
+        json["status"] = "success";
+        json["message"] = "Role updated successfully";
+        co_return drogon::HttpResponse::newHttpJsonResponse(json);
+
+    } catch (const std::exception& e) {
+        Json::Value json;
+        json["status"] = "error";
+        json["message"] = "Server error: " + std::string(e.what());
+        auto resp = drogon::HttpResponse::newHttpJsonResponse(json);
+        resp->setStatusCode(drogon::k500InternalServerError);
+        co_return resp;
+    }
+}
+
+// 4. ИСКЛЮЧЕНИЕ УЧАСТНИКА ИЗ ГРУППЫ (KICK)
+drogon::Task<drogon::HttpResponsePtr> ChatController::removeMember(drogon::HttpRequestPtr req, std::string chatIdStr, std::string targetUserIdStr) {
+    auto dbClient = drogon::app().getDbClient();
+    int currentUserId = std::stoi(req->attributes()->get<std::string>("user_id"));
+    int chatId = std::stoi(chatIdStr);
+    int targetUserId = std::stoi(targetUserIdStr);
+
+    try {
+        // Проверяем права удаляющего: админ или создатель
+        auto checkAdmin = co_await dbClient->execSqlCoro(
+            "SELECT role FROM chat_members WHERE chat_id = $1 AND user_id = $2 AND role IN ('admin', 'creator');",
+            chatId, currentUserId
+        );
+
+        if (checkAdmin.size() == 0 && currentUserId != targetUserId) {
+            Json::Value json;
+            json["status"] = "error";
+            json["message"] = "Forbidden: Only group admins can kick members";
+            auto resp = drogon::HttpResponse::newHttpJsonResponse(json);
+            resp->setStatusCode(drogon::k403Forbidden);
+            co_return resp;
+        }
+
+        // Удаляем участника из chat_members
+        co_await dbClient->execSqlCoro(
+            "DELETE FROM chat_members WHERE chat_id = $1 AND user_id = $2;",
+            chatId, targetUserId
+        );
+
+        Json::Value json;
+        json["status"] = "success";
+        json["message"] = "Member removed successfully";
+        co_return drogon::HttpResponse::newHttpJsonResponse(json);
+
+    } catch (const std::exception& e) {
+        Json::Value json;
+        json["status"] = "error";
+        json["message"] = "Server error: " + std::string(e.what());
         auto resp = drogon::HttpResponse::newHttpJsonResponse(json);
         resp->setStatusCode(drogon::k500InternalServerError);
         co_return resp;
