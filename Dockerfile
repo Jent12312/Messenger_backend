@@ -19,5 +19,6 @@ EXPOSE 8080
 
 # Указываем рабочую папку для запуска и команду
 WORKDIR /app/build
-RUN mkdir -p uploads/avatars uploads/files
+# Создаем все нужные папки (включая tmp для стриминга) и даем полные права
+RUN mkdir -p uploads/avatars uploads/files uploads/tmp && chmod -R 777 uploads
 CMD ["./messenger_backend"]

@@ -1,8 +1,8 @@
 {
     "app": {
         "threads_num": 0,
-        "document_root": "./uploads",
-        "upload_path": "./uploads",
+        "document_root": "./",
+        "upload_path": "uploads",
         "client_max_body_size": "550M",
         "log": {
             "log_path": "./",

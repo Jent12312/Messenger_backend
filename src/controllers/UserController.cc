@@ -229,7 +229,7 @@ drogon::Task<drogon::HttpResponsePtr> UserController::uploadAvatar(drogon::HttpR
     file.saveAs("avatars/" + newFileName);
 
     // Формируем публичную ссылку
-    std::string avatarUrl = "https://aegischat.jents.online/avatars/" + newFileName;
+    std::string avatarUrl = "https://aegischat.jents.online/uploads/avatars/" + newFileName;
 
     try {
         co_await dbClient->execSqlCoro(
